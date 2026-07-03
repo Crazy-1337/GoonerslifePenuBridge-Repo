@@ -1,0 +1,164 @@
+# .github/workflows/release.yml
+#
+# Goonerslife Penu Bridge — Automated release & manifest update workflow
+#
+# TRIGGER:
+#   Fires when you publish a GitHub Release on this repository.
+#   Drafts are ignored; only "published" releases run this workflow.
+#
+# WHAT IT DOES:
+#   1. Checks out the gh-pages branch (what GitHub Pages serves).
+#   2. Downloads the built QuickModPanel.zip from the new release.
+#   3. Parses the release tag into a four-part AssemblyVersion string.
+#   4. Stamps the current UTC time (Unix epoch) into LastUpdated.
+#   5. Validates the resulting JSON before committing.
+#   6. Commits pluginmaster.json + the zip to gh-pages.
+#   7. GitHub Pages re-deploys automatically — users see the update within minutes.
+#
+# ONE-TIME SETUP CHECKLIST:
+#   □ Enable GitHub Pages: Settings → Pages → Source: "Deploy from branch" → gh-pages
+#   □ Grant Actions write access: Settings → Actions → General →
+#     Workflow permissions → "Read and write permissions"
+#   □ Replace YOUR_GITHUB_USERNAME and YOUR_REPO_NAME in pluginmaster.json
+#     with real values before publishing the first release.
+#   □ Tag releases as "v1.2.3" or "v1.2.3.4" — the parser handles both.
+
+name: Release Plugin
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write   # needed to push the updated manifest to gh-pages
+
+jobs:
+  update-manifest:
+    name: Update pluginmaster.json and publish to gh-pages
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Check out gh-pages branch ────────────────────────────────────────
+      - name: Checkout gh-pages
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          fetch-depth: 0   # full history so the push is clean
+
+      # ── 2. Download the release asset ───────────────────────────────────────
+      # The zip uploaded to the GitHub Release must be named "QuickModPanel.zip".
+      # Build it locally with: dotnet build -c Release
+      # Then attach the output zip when you create (or draft) the release.
+      - name: Download release zip
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "${{ github.event.release.tag_name }}" \
+            --pattern "QuickModPanel.zip" \
+            --dir .
+          echo "Downloaded QuickModPanel.zip from release ${{ github.event.release.tag_name }}"
+
+      # ── 3. Parse release tag into four-part AssemblyVersion ─────────────────
+      # Accepts: "v1.2.3", "v1.2.3.4", "1.2.3", "1.2.3.4"
+      # Outputs: always four parts, e.g. "1.2.3.0"
+      - name: Parse version from tag
+        id: version
+        run: |
+          RAW="${{ github.event.release.tag_name }}"
+          V="${RAW#v}"                             # strip leading "v"
+          IFS='.' read -ra PARTS <<< "$V"
+          while [ "${#PARTS[@]}" -lt 4 ]; do
+            PARTS+=("0")                           # pad to four parts
+          done
+          FULL_VERSION="${PARTS[0]}.${PARTS[1]}.${PARTS[2]}.${PARTS[3]}"
+          echo "version=${FULL_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Parsed version: ${FULL_VERSION}"
+
+      # ── 4. Compute Unix epoch timestamp ─────────────────────────────────────
+      - name: Get current UTC timestamp
+        id: timestamp
+        run: |
+          EPOCH=$(date -u +%s)
+          echo "epoch=${EPOCH}" >> "$GITHUB_OUTPUT"
+          echo "Timestamp: ${EPOCH} ($(date -u -d @${EPOCH} 2>/dev/null || date -u -r ${EPOCH}))"
+
+      # ── 5. Update pluginmaster.json ──────────────────────────────────────────
+      # pluginmaster.json is strict JSON (no comments), so we parse it directly.
+      # The inline Node.js script updates only AssemblyVersion and LastUpdated,
+      # leaving all other fields untouched.
+      - name: Update pluginmaster.json
+        env:
+          PLUGIN_VERSION: ${{ steps.version.outputs.version }}
+          LAST_UPDATED:   ${{ steps.timestamp.outputs.epoch }}
+        run: |
+          node - <<'NODEJS_EOF'
+          'use strict';
+          const fs = require('fs');
+          const MANIFEST = 'pluginmaster.json';
+
+          // pluginmaster.json is kept as strict JSON — parse directly
+          let list;
+          try {
+            list = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
+          } catch (e) {
+            console.error('[error] Failed to parse pluginmaster.json:', e.message);
+            process.exit(1);
+          }
+
+          if (!Array.isArray(list) || list.length === 0) {
+            console.error('[error] pluginmaster.json must be a non-empty JSON array.');
+            process.exit(1);
+          }
+
+          const entry = list[0];
+          const prevVersion = entry.AssemblyVersion;
+          const prevEpoch   = entry.LastUpdated;
+
+          entry.AssemblyVersion = process.env.PLUGIN_VERSION;
+          entry.LastUpdated     = parseInt(process.env.LAST_UPDATED, 10);
+
+          // Validate before writing
+          JSON.parse(JSON.stringify(list));   // throws if anything went wrong
+
+          fs.writeFileSync(MANIFEST, JSON.stringify(list, null, 2) + '\n');
+          console.log(`AssemblyVersion : ${prevVersion} → ${entry.AssemblyVersion}`);
+          console.log(`LastUpdated     : ${prevEpoch} → ${entry.LastUpdated}`);
+          NODEJS_EOF
+
+      # ── 6. Validate the written JSON before committing ───────────────────────
+      # Catches any edge-case corruption before it reaches Dalamud users.
+      - name: Validate pluginmaster.json
+        run: |
+          node -e "
+            const data = require('fs').readFileSync('pluginmaster.json', 'utf8');
+            const list = JSON.parse(data);
+            if (!Array.isArray(list) || list.length === 0)
+              throw new Error('manifest is not a non-empty array');
+            const e = list[0];
+            ['Author','Name','InternalName','AssemblyVersion','RepoUrl',
+             'DownloadLinkInstall','DownloadLinkUpdate','LastUpdated'].forEach(k => {
+              if (e[k] === undefined) throw new Error('missing field: ' + k);
+            });
+            console.log('Validation passed. Version:', e.AssemblyVersion,
+                        '| LastUpdated:', e.LastUpdated);
+          "
+
+      # ── 7. Commit and push to gh-pages ──────────────────────────────────────
+      - name: Commit updated manifest
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pluginmaster.json QuickModPanel.zip
+          git commit -m "release: ${{ github.event.release.tag_name }} (epoch ${{ steps.timestamp.outputs.epoch }})"
+          git push origin gh-pages
+
+      # ── 8. (Optional) Re-attach zip to the GitHub Release ───────────────────
+      # Remove this step if you always upload the zip manually when creating the release.
+      - name: Attach zip to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            QuickModPanel.zip \
+            --clobber
+        continue-on-error: true   # non-fatal if the asset is already attached
