@@ -1,0 +1,25 @@
+[
+  {
+    "Author": "Skylar Kaisa",
+    "Name": "Goonerslife Penu Bridge",
+    "InternalName": "QuickModPanel",
+    "Punchline": "A sleek Penumbra bridge panel for GoonersLife+ mod control.",
+    "Description": "Goonerslife Penu Bridge is a dedicated overlay for controlling the GoonersLife+ Penumbra mod. Toggle options and mod states instantly from a clean, dark control panel without opening Penumbra.",
+    "Tags": [
+      "penumbra",
+      "mods",
+      "utility"
+    ],
+    "DalamudApiLevel": 15,
+    "LoadRequiredState": 0,
+    "LoadSync": false,
+    "CanUnloadAsync": true,
+    "SupportsProfiles": true,
+    "RepoUrl": "https://github.com/Crazy-1337/GoonerslifePenuBridge-Repo",
+    "DownloadLinkInstall": "https://github.com/Crazy-1337/GoonerslifePenuBridge-Repo/releases/latest/download/QuickModPanel.zip",
+    "DownloadLinkUpdate": "https://github.com/Crazy-1337/GoonerslifePenuBridge-Repo/releases/latest/download/QuickModPanel.zip",
+    "DownloadLinkTesting": "https://github.com/Crazy-1337/GoonerslifePenuBridge-Repo/releases/latest/download/QuickModPanel.zip",
+    "AssemblyVersion": "1.0.0.0",
+    "LastUpdated": 1783100736
+  }
+]
