@@ -3,6 +3,8 @@
 A personal [Dalamud](https://github.com/goatcorp/Dalamud) plugin that gives you a fast, dark-themed overlay for toggling **GoonersLife+ v2.1 [Gooners.inc]** Penumbra mod options without ever opening Penumbra.
 
 Author: Skylar Kaisa
+
+
 Requires: (https://github.com/xivdev/Penumbra)
 
 ---
